@@ -1,0 +1,405 @@
+--- LIMBAJE FORMALE SI AUTOMATE ---
+------ TEMA 3 - Regex Parser ------
+
+╦  ╔═╗╔═╗
+║  ╠╣ ╠═╣
+╩═╝╚  ╩ ╩
+
+Cuprins:
+	1. Biblioteci, pachete si utilitare.................Linia  45
+	2. Modularizare.....................................Linia  73
+	    2.1. Gramatica "Regex"..........................Linia  77
+	    2.2. Clasa "NFABuilder".........................Linia 100
+	        2.2.1. Metoda "__init__"....................Linia 117
+	        2.2.2. Metoda "add_transition"..............Linia 123
+	        2.2.3. Metoda "create_enclosing_states".....Linia 129
+	        2.2.4. Metoda "visitSymbol".................Linia 135
+	        2.2.5. Metoda "visitParentheses"............Linia 144
+	        2.2.6. Metoda "visitKleene".................Linia 155
+	        2.2.7. Metoda "visitConcat".................Linia 166
+	        2.2.8. Metoda "visitUnion"..................Linia 179
+	        2.2.9. Metoda "build".......................Linia 191
+	    2.3. Clasa "NFA"................................Linia 200
+	        2.3.1. Metoda "__init__"....................Linia 203
+	        2.3.2. Metoda "__str__".....................Linia 213
+	        2.3.3. Metoda "compute_epsilon_closures"....Linia 219
+	        2.3.4. Metoda "to_dfa"......................Linia 230
+	        2.3.5. Metoda "render_graphviz".............Linia 254
+	    2.4. Clasa "DFA"................................Linia 262
+	        2.4.1. Metoda "__init__"....................Linia 272
+	        2.4.2. Metoda "__str__".....................Linia 284
+	        2.4.3. Metoda "to_min_dfa_myphill_nerode"...Linia 290
+	        2.4.4. Metoda "to_min_dfa_equivalence"......Linia 314
+	        2.4.5. Metoda "render_graphviz".............Linia 344
+	    2.5. Fisierul "main.py".........................Linia 352
+	    	2.5.1. Constante de implementare............Linia 355
+	        2.5.2. Functia "validateInput"..............Linia 369
+	        2.5.3. Modulul principal "main".............Linia 374
+	3. Alte detalii.....................................Linia 386
+
+
+=== =================================== ===
+=== 1. Biblioteci, pachete si utilitare ===
+=== =================================== ===
+
+Folosesc:
+    * antlr4
+        - Diferite stream-uri (FileStream, CommonTokenStream)
+        - Pentru generarea unui parser, lexer si visitor
+        dintr-o gramatica (Linia 77)
+
+    * graphviz
+        - !OPTIONAL!
+        - Daca acesta este instalat pe sistem, se poate seta 'use_graphviz'
+        din 'main.py' (Linia 352) la True pentru a genera reprezentari grafice
+        ale automatelor obtinute. Acestea vor fi create intr-un subdirector
+        numit 'graphviz'
+        - In cazul in care acesta nu este instalat pe sistem dar 'use_graphviz'
+        este setat, se va afisa un mesaj de atentionare si nu se va realiza
+        reprezentarea grafica
+
+	* typing
+	    - Set, FrozenSet, Dict, Tuple etc.
+		- Tiparea metodelor (type hints)
+
+	* utilitare mici din 'sys' si 'itertools'
+	    - Mesaje, operatii pe liste
+
+
+=== =============== ===
+=== 2. Modularizare ===
+=== =============== ===
+
+--- ---------------------- ---
+--- 2.1. Gramatica "Regex" ---
+--- ---------------------- ---
+
+In fisierul 'Regex.g4' din subdirectorul 'antlr_files' se regasesc reguli
+pentru parsarea de expresii regulate simple, formate doar din reuniuni,
+concatenari, Kleene star si paranteze.
+
+Alfabetul este format din litere mici de la 'a' la 'z'.
+
+Pentru a evita o gramatica ambigua, pentru care exista un sir de caractere ce
+prezinta cel putin 2 arbori de parsare (derivari stanga), se impune o precedenta
+intre reguli. Anume, de la cea mai mica precedenta, sunt in ordine: reuniunea,
+concatenarea, Kleene star, paranteza/simbol. Astfel, ne asiguram ca, de exemplu,
+o concatenare va fi evaluata inaintea unei reuniuni ce o contine.
+
+Urmarind acest model de precedente, se pot adauga usor noi reguli, precum cea
+de plus (e.g. 'a+' == 'aa*') care are o precedenta similara lui Kleene star.
+
+Cu ajutorul acestei gramatici, generam un set de fisiere in subdirectorul
+'antlr_files', importante fiind RegexParser, RegexLexer si RegexVisitor.
+
+
+--- ----------------------- ---
+--- 2.2. Clasa "NFABuilder" ---
+--- ----------------------- ---
+
+Aceasta clasa exinde clasa RegexVisitor mentionata anterior. Aceasta metoda
+este indicata in comparatie cu editarea lui RegexVisitor, intrucat la o editare
+a gramaticii, o regenerare a fisierelor cu ajutorul utilitarului antlr4 ar
+suprascrie orice cod din RegexVisitor. Astfel, cu ajutorul acestui fisier avem
+siguranta de a modifica usor si oricand operatiile efectuate in momentul
+visitarii unui nod din arborele de parsare.
+
+Aceasta clasa este folosita pentru a construi un NFA in timpul vizitarii
+unui arbore de parsare aferent unei expresii regulate. Fiecare metoda ce
+viziteaza un nod aferent unei reguli urmareste construirea si conectarea
+unor NFA-uri dupa modelul algoritmului lui Thompson (mai putin concatenarea,
+Linia 166)
+
+
+--- 2.2.1. Metoda "__init__" ---
+
+Initial, NFA-ul nu are nicio tranzitie, alfabetul este format doar din
+caracterul epsilon, nu are stari finale si nu are nicio stare.
+
+
+--- 2.2.2. Metoda "add_transition" ---
+
+Adauga o noua stare destinatie pentru o tranzitie de la o stare sursa pe
+un anumit caracter.
+
+
+--- 2.2.3. Metoda "create_enclosing_states" ---
+
+Genereaza doua stari noi pentru automat, cu scopul de a fi folosite in locul
+in care metoda a fost apelata.
+
+
+--- 2.2.4. Metoda "visitSymbol" ---
+
+In momentul gasirii unui simbol (caracter), acesta este adaugat in alfabet daca
+nu exista deja, si se creeaza un NFA simplu care accepta acest caracter.
+
+Prima si ultima stare ale acestuia sunt returnate pentru a fi legate de catre
+o alta regula.
+
+
+--- 2.2.5. Metoda "visitParentheses" ---
+
+Pentru paranteze, ne asiguram ca Visitor-ul nu trece peste toti copiii regulii,
+printre care si numara si terminalii paranteze (intrucat, in spate, acest
+Visitor realizeaza o agregare a rezultatelor copiilor, iar rezultatele
+vizitarii parantezelor ar da peste cap rezultatul intors de expresia continuta).
+
+Astfel, se forteaza vizitarea expresii din interiorul parantezelor, si se
+returneaza rezultatul acesteia.
+
+
+--- 2.2.6. Metoda "visitKleene" ---
+
+Pentru Kleene star, incadram NFA-ul interior intre doua stari noi. Permitem
+noului NFA sa treaca peste intreg NFA-ul interior printr-o tranzitie epsilon
+intre aceste doua stari noi. Permitem, totodata, repetarea acestui NFA interior
+printr-o tranzitie epsilon de la starea finala a acestuia la starea initiala.
+
+Prima si ultima stare ale NFA-ul nou format sunt returnate pentru a fi legate
+de catre o alta regula.
+
+
+--- 2.2.7. Metoda "visitConcat" ---
+
+Conform algoritmului lui Thompson, in momentul concatenarii a doua NFA-uri,
+ultima stare a celui din stanga ar trebui sa devina prima stare a celui din
+dreapta. In ceea ce priveste codul, aceasta procedura ar implica actualizarea
+tranzitiilor deja formate. Pentru a usura aceasta actiune, cele doua NFA-uri
+sunt legate pur si simplu printr-o tranzitie epsilon, de la starea finala a
+celui din stanga la starea initiala a celui din dreapta.
+
+Starea initiala a NFA-ului stang si cea finala a NFA-ului drept sunt returnate
+pentru a fi legate de catre o alta regula.
+
+
+--- 2.2.8. Metoda "visitUnion" ---
+
+Incadram NFA-urile continute intre doua stari noi. Permitem noului NFA sa
+treaca din noua stare initiala catre oricare dintre starile initiale ale
+NFA-urilor interioare prin cate o tranzitie epsilon de la aceasta stare catre
+starile initiale ale lor. Totodata, permitem NFA-urilor interioare sa revina
+la noua stare finala prin cate o tranzitie epsilon de la starile lor finale
+catre aceasta.
+
+Starile noi create sunt returnate pentru a fi legate de catre o alta regula.
+
+
+--- 2.2.9. Metoda "build" ---
+
+Aceasta metoda este folosita pentru a incepe vizitarea arborelui de parsare.
+Dupa incheierea acestuia, NFA-ului obtinut este incadrat intre o stare initiala,
+0, si o stare finala. Aceste campuri sunt folosite, pe langa alfabetul si
+delta-ul calculat, pentru a returna o instanta a unui NFA.
+
+
+--- ---------------- ---
+--- 2.3. Clasa "NFA" ---
+--- ---------------- ---
+
+--- 2.3.1. Metoda "__init__" ---
+
+Se executa sanity checks cu privire la campurile intentionate a fi detaliile
+unui NFA ce urmeaza a fi instantiat.
+
+Nu pot exista stari finale ce nu sunt stari ale automatului.
+
+Nu pot exista tranzitii catre stari care nu sunt ale automatului.
+
+
+--- 2.3.2. Metoda "__str__" ---
+
+Metoda este overriden pentru a intoarce o reprezentare string a NFA-ului,
+conform cerintei.
+
+
+--- 2.3.3. Metoda "compute_epsilon_closures" ---
+
+Aceasta metoda initializeaza inchiderile epsilon pentru fiecare stare,
+realizand o singura parcurgere a NFA-ului. Astfel, ulterior se poate obtine
+in O(1) inchiderea epsilon a unei stari.
+
+Aceasta este o imbunatarie a implementarii cu o metoda "epsilonClosure" ce
+ar calcula, la apel, inchiderea epsilon a unei stari (lucru care se poate
+intampla din nou si ar avea acelasi rezultat)
+
+
+--- 2.3.4. Metoda "to_dfa" ---
+
+Intoarce DFA-ul aferent obiectului de tip NFA.
+
+Definesc termenul "multi-state" drept o stare a DFA-ului rezultata din reuniunea
+mai multor stari ale NFA-ului.
+
+Se respecta urmatorul algoritm:
+	- Multi-state-ul initial este inchiderea cu epsilon asupra starii initiale
+	- Pentru fiecare multi-state neprocesat:
+		- Pentru fiecare caracter al alfabetului (mai putin epsilon):
+			- Se formeaza un nou multi-state ce reprezinta starile in care
+			automatul poate ajunge, pornind din orice stare din multi-state-ul
+			neprocesat, pe tranzitiile caracterului in cauza. Starile rezultate
+			sunt inchise cu epsilon
+			- Acest multi-state se adauga in coada de multi-state-uri
+			neprocesate
+	- Se stabilesc starile finale si se convertesc starile tranzitiilor din
+	multi-state-uri in stari ale DFA-ului. Un multi-state este stare finala
+	a DFA-ului daca acesta contine cel putin o stare finala a NFA-ului.
+
+Astfel, se intoarce DFA-ul generat
+
+
+--- 2.3.5. Metoda "render_graphviz" ---
+
+Daca sunt indeplinite unele conditii (Linia 355), apelarea acestei metode
+genereaza si deschide un fisier PDF ce contine o reprezentare grafica acestui
+NFA.
+
+
+--- ---------------- ---
+--- 2.4. Clasa "DFA" ---
+--- ---------------- ---
+
+Un obiect de acest tip reprezinta un DFA, cunoscandu-se starile, starile finale,
+alfabetul, si functia delta.
+
+Clasa prezinta doua metode pentru a genera un nou DFA care este min-DFA
+acestuia.
+
+
+--- 2.4.1. Metoda "__init__" ---
+
+Se executa sanity checks cu privire la campurile intentionate a fi detaliile
+unui NFA ce urmeaza a fi instantiat.
+
+Nu pot exista stari finale ce nu sunt stari ale automatului.
+
+Nu pot exista tranzitii catre stari care nu sunt ale automatului.
+Functia delta trebuie sa fie completa. Trebuie sa existe exact o singura
+tranzitie pentru fiecare pereche de stare si simbol din alfabet.
+
+
+--- 2.4.2. Metoda "__str__" ---
+
+Metoda este overriden pentru a intoarce o reprezentare string a NFA-ului,
+conform cerintei.
+
+
+--- 2.4.3. Metoda "to_min_dfa_myphill_nerode" ---
+
+Intoarce un min-DFA calculat dupa teorema Myphill-Nerode.
+
+Se incepe cu un tabel in care fiecare celula reprezinta o pereche de stari,
+conectate sau nu. Toate sunt initial nemarcate.
+
+Se marcheaza fiecare celula ce prezinta o stare finala si una care nu este
+finala.
+
+Se marcheaza perechea de stari (s1, s2) daca perechea
+(delta(s1, a), delta(s2, a)) este si ea marcata, unde a este orice caracter
+din alfabet. Acest pas se repeta pana cand nicio celula nu mai poate fi marcata.
+
+Perechile care raman marcate pot fi considerate muchii ale unui graf orientat.
+Prin gasirea componentelor conexe ale acestui graf, starile aferente DFA-ului
+care fac parte dintr-o componenta conexa devin o singura stare, aferenta
+min-DFA-ului.
+
+Astfel, metoda Myphill-Nerode este o metoda foarte rapida pentru a gasi
+min-DFA-ul unui DFA. In cazul in care se doreste generarea min-DFA-ului in
+main (Linia 355), aceasta metoda este cea folosita.
+
+
+--- 2.4.4. Metoda "to_min_dfa_equivalence" ---
+
+Intoarce un min-DFA calculat dupa teorema echivalentei.
+
+Daca doua stari 's1' si 's2' nu pot fi distinse, acestea pot fi combinate intr-o
+singura stare.
+
+Doua stari 's1' si 's2' pot fi distinse daca exista cel putin un cuvant 'w'
+astfel incat, pornind de la configuratiile (s1, w) si (s2, w) una va ajunge
+sa fie acceptata iar cealalta nu.
+
+Impartim starile in doua partitii, una ce contine starile finale si una pe
+celelalte. Notam aceasta partitionare 'P_0'.
+
+Gasim 'P_k' partitionand 'P_k-1'. Pentru fiecare pereche de stari din fiecare
+partitie din 'P_k-1', daca aceste doua stari pot fi distinse, acestea trebuiesc
+distribuite in partitii diferite. Doua stari 's1' si 's2' pot fi distinse in
+partitionarea 'P_k' daca exista un caracter 'a' din alfabet astfel incat
+delta(s1, a) si delta(s2, a) sunt in partitii diferite ale lui 'P_k-1'. Acest
+pas se repeta pana cand nu se mai poate realiza o alta partitionare.
+
+La final, fiecare partitie de stari din partitionarea finala va reprezenta
+o singura stare din min-DFA.
+
+Acest algoritm este mult mai lent, intrucat presupune un algoritm similar
+celui de gasire a componentelor conexe folosit la metoda Myphill-Nerode,
+prezentata anterior. Acest algoritm este aplicat la fiecare pas de partitionare,
+astfel crescand semnificativ complexitatea.
+
+
+--- 2.4.5. Metoda "render_graphviz" ---
+
+Daca sunt indeplinite unele conditii (Linia 355), apelarea acestei metode
+genereaza si deschide un fisier PDF ce contine o reprezentare grafica a acestui
+DFA.
+
+
+--- ----------------------- ---
+--- 2.5. Fisierul "main.py" ---
+--- ----------------------- ---
+
+--- 2.5.1. Constante de implementare ---
+
+use_graphviz
+    - Setarea acestei constante la True duce la generarea si deschiderea unor
+    fisiere PDF ce contin reprezentarea grafica a automatelor obtinute
+    - Pachetul "graphviz" trebuie sa fie instalat. In caz contrar, un
+    avertisment va fi emis si nu se va deschide niciun fisier
+
+construct_min_dfa
+    - Setarea acestei constante la True face ca DFA-ul folosit pentru rezolvarea
+    cerintei sa fie minimizat. In cazul in care si 'use_graphviz' este True,
+    se genereaza si reprezentarea grafica a acestui automat.
+
+
+--- 2.5.2. Functia "validateInput" ---
+
+Functie cu rol de sanity check.
+
+
+--- 2.5.3. Modulul principal "main" ---
+
+Dupa ce se stabilesc fisierele de IO, se foloseste fisierul de input ce
+contine o expresie regulata pentru a forma un parser, un lexer si un visitor
+ce lucreaza cu aceasta.
+
+Cu ajutorul lui NFABuilder (Linia 100) se genereaza un NFA (Linia 200), din
+care este obtinut un DFA (Linia 262) ce accepta expresia regulata din fisierul
+de input.
+
+
+=== =============== ===
+=== 3. Alte detalii ===
+=== =============== ===
+	La conversia din NFA in DFA, structurile de date extra au roluri precum
+	complexitate redusa (indexarea intr-un dictionar ale multi-state-urilor),
+	sau implementare corecta (conversiile din set in frozenset, intrucat doar
+	acesta din urma este hashable - aspect necesar pentru seturi/dictionare).
+
+	Am ales, prin metoda "compute_epsilon_closures" (Linia 219), sa calculez
+	initial, printr-o singura parcurgere a NFA-ului, inchiderile epsilon pentru
+	fiecare stare, intrucat acestea sunt necesare de mai multe ori pe parcursul
+	conversiei in DFA dar ele nu se schimba.
+
+	Initial realizasem conversiile din DFA in min-DFA pentru a-mi verifica
+	rezultatele cand nu dispuneam de checker, si am hotarat sa le pastrez in
+	implementare, ba chiar sa le si uzitez.
+
+	Dintr-un motiv similar, am ales si sa pastrez reprezentarea grafica a
+	automatelor cu ajutorul utilitarului 'graphviz', in cazul in care cineva
+	il are si doreste sa vizualizeze automatele generate.
+
+	Am pastrat in subdirectorul 'antlr_files' gramatica si toate fisierele
+	generate de utilitarul 'antlr4' pentru a fi verificate, fiind strans
+	legate de tema.
